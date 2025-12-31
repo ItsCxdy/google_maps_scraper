@@ -1,342 +1,119 @@
 """
 Utility Functions Module
-
-This module contains helper functions for parsing data, saving to Excel,
-and other utility operations used throughout the scraper.
 """
 
 import re
 import json
 import os
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from datetime import datetime
 from loguru import logger
+from selenium.webdriver.common.by import By
 
 
 def clean_text(text: str) -> str:
-    """
-    Clean and normalize text by removing extra whitespace and special characters.
-    
-    Args:
-        text: Raw text string
-        
-    Returns:
-        Cleaned text string
-    """
     if not text:
         return ""
-    
-    # Remove extra whitespace
-    text = re.sub(r'\s+', ' ', text)
-    
-    # Remove leading/trailing whitespace
-    text = text.strip()
-    
-    return text
+    return re.sub(r'\s+', ' ', text).strip()
 
 
-def extract_rating(rating_text: str) -> float:
+def safe_extract(driver, selectors, attr: str = None) -> str:
     """
-    Extract numeric rating from rating text.
-    
-    Args:
-        rating_text: Text containing rating (e.g., "4.5 stars")
-        
-    Returns:
-        Numeric rating value
+    Google-safe extractor with selector fallbacks.
     """
-    if not rating_text:
+    for selector in selectors:
+        try:
+            el = driver.find_element(By.CSS_SELECTOR, selector)
+            value = el.get_attribute(attr) if attr else el.text
+            if value and value.strip():
+                return value.strip()
+        except:
+            continue
+    return "N/A"
+
+
+def extract_rating(text: str) -> float:
+    try:
+        match = re.search(r'(\d+\.?\d*)', text)
+        return float(match.group(1)) if match else 0.0
+    except:
         return 0.0
-    
+
+
+def extract_review_count(text: str) -> int:
     try:
-        # Extract numeric value using regex
-        match = re.search(r'(\d+\.?\d*)', str(rating_text))
-        if match:
-            return float(match.group(1))
-    except ValueError:
-        pass
-    
-    return 0.0
-
-
-def extract_review_count(review_text: str) -> int:
-    """
-    Extract numeric review count from review text.
-    
-    Args:
-        review_text: Text containing review count (e.g., "1,234 reviews")
-        
-    Returns:
-        Numeric review count
-    """
-    if not review_text:
+        return int(re.sub(r'[^\d]', '', text))
+    except:
         return 0
-    
-    try:
-        # Remove commas and extract numeric value
-        cleaned = re.sub(r'[^\d]', '', str(review_text))
-        if cleaned:
-            return int(cleaned)
-    except ValueError:
-        pass
-    
-    return 0
 
 
-def parse_address(address: str) -> Dict[str, str]:
-    """
-    Parse address string into components.
-    
-    Args:
-        address: Full address string
-        
-    Returns:
-        Dictionary with address components (street, city, state, zip, country)
-    """
-    if not address:
-        return {
-            'street': '',
-            'city': '',
-            'state': '',
-            'zip': '',
-            'country': ''
-        }
-    
-    # Simple parsing - actual implementation would be more sophisticated
-    parts = [p.strip() for p in address.split(',')]
-    
-    result = {
-        'street': parts[0] if len(parts) > 0 else '',
-        'city': parts[1] if len(parts) > 1 else '',
-        'state': parts[2] if len(parts) > 2 else '',
-        'zip': '',
-        'country': parts[-1] if len(parts) > 0 else ''
-    }
-    
-    return result
-
-
-def format_phone_number(phone: str) -> str:
-    """
-    Format phone number to standard format.
-    
-    Args:
-        phone: Raw phone number string
-        
-    Returns:
-        Formatted phone number
-    """
-    if not phone:
-        return ""
-    
-    # Remove all non-digit characters
-    digits = re.sub(r'[^\d]', '', str(phone))
-    
-    # Format as (XXX) XXX-XXXX for US numbers
-    if len(digits) == 10:
-        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
-    elif len(digits) > 0:
-        return f"+{digits}"
-    
-    return phone
-
-
-def validate_email(email: str) -> bool:
-    """
-    Validate email address format.
-    
-    Args:
-        email: Email address string
-        
-    Returns:
-        True if valid, False otherwise
-    """
-    if not email:
-        return False
-    
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    return bool(re.match(pattern, str(email)))
-
-
-def get_timestamp() -> str:
-    """
-    Get current timestamp in ISO format.
-    
-    Returns:
-        Current timestamp string
-    """
-    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-
-def create_output_filename(search_query: str, location: str = None) -> str:
-    """
-    Create a unique filename for output based on search query and timestamp.
-    
-    Args:
-        search_query: The search query string
-        location: Optional location string
-        
-    Returns:
-        Formatted filename for Excel output
-    """
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
-    if location:
-        filename = f"google_maps_{search_query}_{location}_{timestamp}.xlsx"
-    else:
-        filename = f"google_maps_{search_query}_{timestamp}.xlsx"
-    
-    # Clean filename of special characters
-    filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
-    
-    return filename
-
-
-def ensure_output_directory(directory: str = 'outputs') -> str:
-    """
-    Ensure output directory exists, create if it doesn't.
-    
-    Args:
-        directory: Directory path
-        
-    Returns:
-        Absolute path to directory
-    """
+def ensure_output_directory(directory: str = "outputs") -> str:
     if not os.path.exists(directory):
         os.makedirs(directory)
-        logger.info(f"Created output directory: {directory}")
+        logger.info(f"Created directory {directory}")
     return directory
 
 
-def save_to_json(data: List[Dict[str, Any]], filename: str) -> None:
-    """
-    Save data to JSON file.
-    
-    Args:
-        data: List of dictionaries to save
-        filename: Output JSON filename
-    """
-    try:
-        with open(filename, 'w', encoding='utf-8') as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        logger.info(f"Data saved to {filename}")
-        print(f"✅ Data saved to {filename}")
-    except Exception as e:
-        logger.error(f"Error saving to JSON: {e}")
-        print(f"❌ Error saving to JSON: {e}")
+def create_output_filename(search: str, location: str = None) -> str:
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    name = f"{search}_{location}_{ts}" if location else f"{search}_{ts}"
+    return re.sub(r'[<>:"/\\|?*]', "_", name) + ".xlsx"
 
 
-def load_from_json(filename: str) -> List[Dict[str, Any]]:
-    """
-    Load data from JSON file.
-    
-    Args:
-        filename: JSON filename to load
-        
-    Returns:
-        List of dictionaries
-    """
-    try:
-        with open(filename, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except FileNotFoundError:
-        logger.warning(f"File not found: {filename}")
-        print(f"⚠️ File not found: {filename}")
-        return []
-    except Exception as e:
-        logger.error(f"Error loading from JSON: {e}")
-        print(f"❌ Error loading from JSON: {e}")
-        return []
+def save_to_json(data: List[Dict[str, Any]], filename: str):
+    with open(filename, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
 
 def merge_duplicate_places(places: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """
-    Merge duplicate places based on name and address.
-    
-    Args:
-        places: List of place dictionaries
-        
-    Returns:
-        List of unique places
-    """
     seen = set()
-    unique_places = []
-    
-    for place in places:
-        # Create a unique key based on name and address
-        name = clean_text(place.get('name', ''))
-        address = clean_text(place.get('address', ''))
-        key = f"{name}_{address}"
-        
-        if key and key not in seen:
+    unique = []
+    for p in places:
+        key = (p.get("name"), p.get("address"))
+        if key not in seen:
             seen.add(key)
-            unique_places.append(place)
-    
-    return unique_places
+            unique.append(p)
+    return unique
 
 
-def filter_places_by_rating(places: List[Dict[str, Any]], min_rating: float) -> List[Dict[str, Any]]:
-    """
-    Filter places by minimum rating.
-    
-    Args:
-        places: List of place dictionaries
-        min_rating: Minimum rating threshold
-        
-    Returns:
-        Filtered list of places
-    """
+def filter_places_by_rating(places, min_rating):
     filtered = []
-    for place in places:
-        try:
-            rating = float(place.get('rating', 0))
-            if rating >= min_rating:
-                filtered.append(place)
-        except (ValueError, TypeError):
-            pass
-    
+
+    for p in places:
+        rating = normalize_rating(p.get("rating", ""))
+        if rating is None:
+            continue
+
+        if rating >= min_rating:
+            filtered.append(p)
+
     return filtered
 
 
-def sort_places_by_rating(places: List[Dict[str, Any]], descending: bool = True) -> List[Dict[str, Any]]:
+def normalize_rating(rating_raw: str) -> float | None:
     """
-    Sort places by rating.
-    
-    Args:
-        places: List of place dictionaries
-        descending: Sort order (True for descending, False for ascending)
-        
-    Returns:
-        Sorted list of places
+    Extract the first valid numeric rating from text.
+    Examples:
+      "4.6\n2,345 reviews" -> 4.6
+      "4.2 stars"         -> 4.2
+      "N/A"               -> None
     """
+    if not rating_raw:
+        return None
+
+    match = re.search(r"\b\d\.\d\b", rating_raw)
+    if not match:
+        return None
+
     try:
-        return sorted(
-            places,
-            key=lambda x: float(x.get('rating', 0)),
-            reverse=descending
-        )
-    except Exception as e:
-        logger.warning(f"Error sorting by rating: {e}")
-        return places
+        return float(match.group())
+    except ValueError:
+        return None
 
 
-def sort_places_by_reviews(places: List[Dict[str, Any]], descending: bool = True) -> List[Dict[str, Any]]:
-    """
-    Sort places by number of reviews.
-    
-    Args:
-        places: List of place dictionaries
-        descending: Sort order (True for descending, False for ascending)
-        
-    Returns:
-        Sorted list of places
-    """
-    try:
-        return sorted(
-            places,
-            key=lambda x: int(x.get('reviews', 0)),
-            reverse=descending
-        )
-    except Exception as e:
-        logger.warning(f"Error sorting by reviews: {e}")
-        return places
+def sort_places_by_rating(places):
+    return sorted(places, key=lambda x: float(x.get("rating", 0)), reverse=True)
+
+
+def sort_places_by_reviews(places):
+    return sorted(places, key=lambda x: int(x.get("reviews", 0)), reverse=True)
